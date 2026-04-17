@@ -128,7 +128,7 @@ local function sendWebhook(stolenName, dataOverride)
     local mutSuffix = (mutation ~= "None") and (" (" .. mutation .. ")") or ""
 
     local embed = {
-        title       = "Steal logged",
+        title       = "Steal with SMKT HUB logged",
         description = string.format("**%s** stole **%s%s**", LP.Name, cleanName, mutSuffix),
         color       = 0x57F287,
         fields      = {
