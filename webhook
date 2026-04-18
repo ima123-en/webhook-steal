@@ -17,6 +17,22 @@ local Synchronizer  = require(Packages:WaitForChild("Synchronizer"))
 local AnimalsData   = require(Datas:WaitForChild("Animals"))
 local AnimalsShared = require(Shared:WaitForChild("Animals"))
 
+local MIN_GEN_VALUE = 75000000
+
+local ALWAYS_SEND = {}
+for _, n in ipairs({
+    "Headless Horseman","Ketchuru and Musturu","Burguro And Fryuro","Tang Tang Keletang",
+    "Tictac Sahur","Tralaledon","Dragon Cannelloni","Los Tacoritas","Fragrama and Chocrama",
+    "La Secret Combinasion","Nuclearo Dinossauro","Los Primos","La Ginger Sekolah","Festive 67",
+    "Ketupat Kepat","Eviledon","Spooky and Pumpky","Cooki and Milki","Garama and Madundung",
+    "Reinito Sleighito","Orcaledon","Capitano Moby","Lavadorito Spinito","La Supreme Combinasion",
+    "Guest 666","Strawberry Elephant","Dragon Gingerini","Meowl","Skibidi Toilet",
+    "Foxini Lanternini","La Casa Boo","Cloverat Clapat","Jolly Jolly Sahur","Gingerat Gerat",
+    "Los Hotspotsitos","Hydra Dragon Cannelloni","Popcuru and Fizzuru"
+}) do
+    ALWAYS_SEND[n:lower()] = true
+end
+
 local function formatNumber(num)
     if not num or num == 0 then return "Unknown" end
     if num >= 1e12 then return string.format("%.2fT", num/1e12)
@@ -31,7 +47,6 @@ local function strip(str)
     return (str:gsub("<.->", ""):gsub("^%s+", ""):gsub("%s+$", ""))
 end
 
--- Cache: name (lowercase) -> { mutation, genText, owner }
 local brainrotCache = {}
 
 local function getOwnerName(owner)
@@ -46,12 +61,9 @@ local function scanPlot(plot)
     pcall(function()
         local ch = Synchronizer:Get(plot.Name)
         if not ch then return end
-
         local owner = ch:Get("Owner")
         local ownerName = getOwnerName(owner)
         if not ownerName then return end
-
-        -- Prüfe ob eigene Base
         local isOwn = false
         if typeof(owner) == "Instance" and owner:IsA("Player") then
             isOwn = owner.UserId == LP.UserId
@@ -59,10 +71,8 @@ local function scanPlot(plot)
             isOwn = owner.UserId == LP.UserId
         end
         if isOwn then return end
-
         local al = ch:Get("AnimalList")
         if not al then return end
-
         for slot, ad in pairs(al) do
             if type(ad) == "table" then
                 local aInfo = AnimalsData[ad.Index]
@@ -70,17 +80,15 @@ local function scanPlot(plot)
                     local displayName = aInfo.DisplayName or ad.Index
                     local key = displayName:lower()
                     local mut = ad.Mutation or "None"
-                    local gv  = AnimalsShared:GetGeneration(ad.Index, ad.Mutation, ad.Traits, nil)
-
-                    -- Nur überschreiben wenn genValue besser
+                    local gv = AnimalsShared:GetGeneration(ad.Index, ad.Mutation, ad.Traits, nil)
                     local existing = brainrotCache[key]
                     if not existing or gv > (existing.genValue or 0) then
                         brainrotCache[key] = {
-                            name      = displayName,
-                            mutation  = mut,
-                            genText   = formatNumber(gv),
-                            genValue  = gv,
-                            owner     = ownerName,
+                            name     = displayName,
+                            mutation = mut,
+                            genText  = formatNumber(gv),
+                            genValue = gv,
+                            owner    = ownerName,
                         }
                     end
                 end
@@ -97,7 +105,6 @@ local function scanAll()
     end
 end
 
--- Initial scan + alle 4 Sekunden neu
 task.spawn(function()
     while true do
         scanAll()
@@ -105,7 +112,6 @@ task.spawn(function()
     end
 end)
 
--- Auch bei Plot-Changes sofort updaten
 local plots = Workspace:FindFirstChild("Plots")
 if plots then
     plots.ChildAdded:Connect(function(p)
@@ -114,35 +120,36 @@ if plots then
     end)
 end
 
-local function sendWebhook(stolenName, dataOverride)
+local function shouldSend(cleanName, data)
+    if ALWAYS_SEND[cleanName:lower()] then return true end
+    if data and data.genValue and data.genValue >= MIN_GEN_VALUE then return true end
+    return false
+end
+
+local function sendWebhook(stolenName)
     if type(WEBHOOK_URL) ~= "string" or WEBHOOK_URL == "" then return end
-
     local cleanName = strip(stolenName or "")
-    if cleanName == "" then cleanName = "Unknown" end
-
-    local data     = dataOverride or brainrotCache[cleanName:lower()] or {}
+    if cleanName == "" then return end
+    local data     = brainrotCache[cleanName:lower()] or {}
     local mutation = data.mutation or "None"
     local genText  = data.genText  or "Unknown"
     local owner    = data.owner    or "Unknown"
-
+    if not shouldSend(cleanName, data) then return end
     local mutSuffix = (mutation ~= "None") and (" (" .. mutation .. ")") or ""
-
     local embed = {
-        title       = "Steal with SMKT HUB logged",
+        title       = "Steal logged",
         description = string.format("**%s** stole **%s%s**", LP.Name, cleanName, mutSuffix),
         color       = 0x57F287,
         fields      = {
-            { name = "Brainrot",   value = cleanName,  inline = true },
-            { name = "Mutation",   value = mutation,    inline = true },
-            { name = "Generation", value = genText,     inline = true },
-            { name = "Owner",      value = owner,       inline = true },
+            { name = "Brainrot",   value = cleanName, inline = true },
+            { name = "Mutation",   value = mutation,   inline = true },
+            { name = "Generation", value = genText,    inline = true },
+            { name = "Owner",      value = owner,      inline = true },
         },
         timestamp   = DateTime.now():ToIsoDate(),
         footer      = { text = "SMKT HUB" }
     }
-
     local json = HttpService:JSONEncode({ embeds = { embed } })
-
     task.spawn(function()
         pcall(function()
             local req = request or http_request or (syn and syn.request)
@@ -160,13 +167,12 @@ local function sendWebhook(stolenName, dataOverride)
     end)
 end
 
--- Steal Detection via Text
 local lastKey, lastTime = nil, 0
-local patterns = { "you stole ", "you have stolen " }
+local stealPatterns = { "you stole ", "you have stolen " }
 
 local function tryExtract(plain)
     local l = plain:lower()
-    for _, pat in ipairs(patterns) do
+    for _, pat in ipairs(stealPatterns) do
         local idx = l:find(pat, 1, true)
         if idx then
             local raw = plain:sub(idx + #pat)
@@ -183,14 +189,11 @@ local function onText(txt)
     local plain = strip(txt)
     local item  = tryExtract(plain)
     if not item then return end
-
     local key = item:lower()
     local now = tick()
     if key == lastKey and now - lastTime < 3 then return end
     lastKey  = key
     lastTime = now
-
-    -- Cache nochmal direkt vor dem Senden neu scannen für maximale Aktualität
     task.spawn(function()
         scanAll()
         task.wait(0.1)
@@ -214,5 +217,3 @@ end
 
 for _, g in ipairs(PlayerGui:GetChildren()) do hookGui(g) end
 PlayerGui.ChildAdded:Connect(hookGui)
-
-print("[StealWebhook] loaded")
