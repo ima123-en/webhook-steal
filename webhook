@@ -1,10 +1,10 @@
-local Players = game:GetService("Players")
+local Players          = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Workspace = game:GetService("Workspace")
-local HttpService = game:GetService("HttpService")
-local RunService = game:GetService("RunService")
+local Workspace        = game:GetService("Workspace")
+local HttpService      = game:GetService("HttpService")
+local RunService       = game:GetService("RunService")
 
-local LP = Players.LocalPlayer
+local LP       = Players.LocalPlayer
 local PlayerGui = LP:WaitForChild("PlayerGui")
 
 local WEBHOOK_URL = "https://discord.com/api/webhooks/1492346077280469123/Bo3K1TPKnwiS8dQrnZE-lFKTglkgKmliOTTgJFY-pm-2SKbZG5sx5wYtyAjU4al7mgaM"
@@ -61,9 +61,11 @@ local function scanPlot(plot)
     pcall(function()
         local ch = Synchronizer:Get(plot.Name)
         if not ch then return end
+
         local owner = ch:Get("Owner")
         local ownerName = getOwnerName(owner)
         if not ownerName then return end
+
         local isOwn = false
         if typeof(owner) == "Instance" and owner:IsA("Player") then
             isOwn = owner.UserId == LP.UserId
@@ -71,8 +73,10 @@ local function scanPlot(plot)
             isOwn = owner.UserId == LP.UserId
         end
         if isOwn then return end
+
         local al = ch:Get("AnimalList")
         if not al then return end
+
         for slot, ad in pairs(al) do
             if type(ad) == "table" then
                 local aInfo = AnimalsData[ad.Index]
@@ -126,44 +130,68 @@ local function shouldSend(cleanName, data)
     return false
 end
 
+local function getRequestFunc()
+    local r =
+        (syn and syn.request) or
+        (http and http.request) or
+        (fluxus and fluxus.request) or
+        (krnl and krnl.request) or
+        request or
+        http_request
+    return r
+end
+
 local function sendWebhook(stolenName)
     if type(WEBHOOK_URL) ~= "string" or WEBHOOK_URL == "" then return end
+
     local cleanName = strip(stolenName or "")
     if cleanName == "" then return end
-    local data     = brainrotCache[cleanName:lower()] or {}
-    local mutation = data.mutation or "None"
-    local genText  = data.genText  or "Unknown"
-    local owner    = data.owner    or "Unknown"
-    if not shouldSend(cleanName, data) then return end
+
+    local baseName = cleanName:gsub("%s*%([^)]*%)", "")
+    baseName = strip(baseName)
+    if baseName == "" then baseName = cleanName end
+
+    local key       = baseName:lower()
+    local data      = brainrotCache[key] or {}
+    local mutation  = data.mutation or "None"
+    local genText   = data.genText  or "Unknown"
+    local owner     = data.owner    or "Unknown"
+
+    if not shouldSend(baseName, data) then return end
+
     local mutSuffix = (mutation ~= "None") and (" (" .. mutation .. ")") or ""
     local embed = {
         title       = "Steal logged",
-        description = string.format("**%s** stole **%s%s**", LP.Name, cleanName, mutSuffix),
+        description = string.format("**%s** stole **%s%s**", LP.Name, baseName, mutSuffix),
         color       = 0x57F287,
         fields      = {
-            { name = "Brainrot",   value = cleanName, inline = true },
-            { name = "Mutation",   value = mutation,   inline = true },
-            { name = "Generation", value = genText,    inline = true },
-            { name = "Owner",      value = owner,      inline = true },
+            { name = "Brainrot",   value = baseName, inline = true },
+            { name = "Mutation",   value = mutation, inline = true },
+            { name = "Generation", value = genText,  inline = true },
+            { name = "Owner",      value = owner,    inline = true },
         },
         timestamp   = DateTime.now():ToIsoDate(),
         footer      = { text = "SMKT HUB" }
     }
+
     local json = HttpService:JSONEncode({ embeds = { embed } })
+
     task.spawn(function()
-        pcall(function()
-            local req = request or http_request or (syn and syn.request)
-            if req then
+        local req = getRequestFunc()
+        if req then
+            pcall(function()
                 req({
                     Url     = WEBHOOK_URL,
                     Method  = "POST",
                     Headers = { ["Content-Type"] = "application/json" },
                     Body    = json
                 })
-            else
+            end)
+        else
+            pcall(function()
                 HttpService:PostAsync(WEBHOOK_URL, json, Enum.HttpContentType.ApplicationJson)
-            end
-        end)
+            end)
+        end
     end)
 end
 
@@ -189,11 +217,15 @@ local function onText(txt)
     local plain = strip(txt)
     local item  = tryExtract(plain)
     if not item then return end
-    local key = item:lower()
+
+    local baseKey = strip(item:gsub("%s*%([^)]*%)", "")):lower()
+    if baseKey == "" then baseKey = item:lower() end
+
     local now = tick()
-    if key == lastKey and now - lastTime < 3 then return end
-    lastKey  = key
+    if baseKey == lastKey and now - lastTime < 3 then return end
+    lastKey  = baseKey
     lastTime = now
+
     task.spawn(function()
         scanAll()
         task.wait(0.1)
@@ -211,9 +243,14 @@ local function hookObj(obj)
 end
 
 local function hookGui(g)
-    for _, d in ipairs(g:GetDescendants()) do hookObj(d) end
+    for _, d in ipairs(g:GetDescendants()) do
+        hookObj(d)
+    end
     g.DescendantAdded:Connect(hookObj)
 end
 
-for _, g in ipairs(PlayerGui:GetChildren()) do hookGui(g) end
+for _, g in ipairs(PlayerGui:GetChildren()) do
+    hookGui(g)
+end
+
 PlayerGui.ChildAdded:Connect(hookGui)
